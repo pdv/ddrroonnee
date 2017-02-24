@@ -7,112 +7,174 @@
 </div>
 
 <script>
-'use strict'
+ 'use strict'
 
-const actx = new window.AudioContext()
+ const actx = new window.AudioContext()
 
-const out = actx.createGain();
-out.gain.value = 0.5;
-out.connect(actx.destination);
+ const osc1 = actx.createOscillator()
+ osc1.type = 'sine'
+ osc1.frequency.value = 220
 
-const osc1 = actx.createOscillator()
-osc1.type = 'sine'
-osc1.frequency.value = 220
+ const osc1down = actx.createOscillator()
+ osc1down.type = 'sine'
+ osc1down.frequency.value = 110
+ const osc1downGain = actx.createGain()
+ osc1downGain.gain.value = 0.1
 
-const osc2 = actx.createOscillator()
-osc2.type = 'sine'
-osc2.frequency.value = 11
+ const osc2 = actx.createOscillator()
+ osc2.type = 'sine'
+ osc2.frequency.value = 11
 
-const osc2gain = actx.createGain()
-osc2gain.gain.value = 30
+ const osc2gain = actx.createGain()
+ osc2gain.gain.value = 30
 
-const filter = actx.createBiquadFilter()
-filter.type = "peaking"
-filter.Q.value = 3
-filter.frequency.value = 350
+ const lpf = actx.createOscillator()
+ lpf.frequency.value = 0
+ const lpfGain = actx.createGain()
+ lpfGain.gain.value = 50
+ lpf.connect(lpfGain)
 
-const delay = actx.createDelay(1)
-const delayGain = actx.createGain()
-delayGain.gain.value = 0.7
-delay.connect(delayGain)
-delayGain.connect(delay)
+ const filter = actx.createBiquadFilter()
+ filter.type = "peaking"
+ filter.Q.value = 3
+ filter.frequency.value = 350
 
-const hpf = actx.createBiquadFilter()
-filter.type = "highpass"
-filter.frequency.value = 200
+ const delay = actx.createDelay(1)
+ const delayGain = actx.createGain()
+ delayGain.gain.value = 0.7
+ delay.connect(delayGain)
+ delayGain.connect(delay)
 
+ const hpf = actx.createBiquadFilter()
+ filter.type = "highpass"
+ filter.frequency.value = 200
 
-function makeDistortionCurve(amount) {
-    var k = typeof amount === 'number' ? amount : 50,
-        n_samples = 44100,
-        curve = new Float32Array(n_samples),
-        deg = Math.PI / 180,
-        i = 0,
-        x;
-    for ( ; i < n_samples; ++i ) {
-        x = i * 2 / n_samples - 1;
-        curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
-    }
-    return curve;
-}
+ const ringmod = actx.createDelay(1)
+ const ringmodFreq = actx.createOscillator()
+ const ringmodGain = actx.createGain()
+ ringmodFreq.frequency.value = 200
+ ringmodGain.gain.value = 0.2
+ ringmodFreq.connect(ringmod.delayTime)
+ ringmod.connect(ringmodGain)
 
-const distortion = actx.createWaveShaper();
-distortion.curve = makeDistortionCurve(400);
-distortion.oversample = '4x';
+ // Distortion
 
-var bufferSize = 2 * actx.sampleRate,
-    noiseBuffer = actx.createBuffer(1, bufferSize, actx.sampleRate),
-    output = noiseBuffer.getChannelData(0);
-for (var i = 0; i < bufferSize; i++) {
-    output[i] = Math.random() * 2 - 1;
-}
+ function makeDistortionCurve(amount) {
+     var k = typeof amount === 'number' ? amount : 50,
+         n_samples = 44100,
+         curve = new Float32Array(n_samples),
+         deg = Math.PI / 180,
+         i = 0,
+         x;
+     for ( ; i < n_samples; ++i ) {
+         x = i * 2 / n_samples - 1;
+         curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
+     }
+     return curve;
+ }
 
-const whiteNoise = actx.createBufferSource();
-whiteNoise.buffer = noiseBuffer;
-whiteNoise.loop = true;
-whiteNoise.start(0);
-const noiseGain = actx.createGain()
-noiseGain.gain.value = 0.2
-whiteNoise.connect(noiseGain)
-noiseGain.connect(filter)
+ const distortion = actx.createWaveShaper();
+ distortion.curve = makeDistortionCurve(400);
+ distortion.oversample = '4x';
 
-osc2.connect(osc2gain)
-osc2gain.connect(osc1.frequency)
+ var bufferSize = 2 * actx.sampleRate,
+     noiseBuffer = actx.createBuffer(1, bufferSize, actx.sampleRate),
+     output = noiseBuffer.getChannelData(0);
+ for (var i = 0; i < bufferSize; i++) {
+     output[i] = Math.random() * 2 - 1;
+ }
 
-osc1.connect(distortion)
-distortion.connect(hpf)
-hpf.connect(filter)
-distortion.connect(filter)
+ const whiteNoise = actx.createBufferSource();
+ whiteNoise.buffer = noiseBuffer;
+ whiteNoise.loop = true;
+ whiteNoise.start(0);
+ const noiseGain = actx.createGain()
+ noiseGain.gain.value = 0.2
+ whiteNoise.connect(noiseGain)
+ noiseGain.connect(filter)
 
-filter.connect(delay)
-filter.connect(out)
-delay.connect(out)
+ function convolverBuffer() {
+     var rate = actx.sampleRate
+       , length = rate * 5 // seconds
+       , decay = 1
+       , impulse = actx.createBuffer(2, length, rate)
+       , impulseL = impulse.getChannelData(0)
+       , impulseR = impulse.getChannelData(1)
+       , n, i;
 
-osc1.start()
-osc2.start()
+     for (i = 0; i < length; i++) {
+         n = i;
+         impulseL[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
+         impulseR[i] = (Math.random() * 2 - 1) * Math.pow(1 - n / length, decay);
+     }
+ }
 
-const knobFns = [
-    (x) => out.gain.value = x / 200,
-    (x) => osc1.frequency.value = x * 5,
-    (x) => osc2.frequency.value = x * 10,
-    (x) => osc2gain.gain.value = x * 2,
-    (x) => filter.frequency.value = x * 10,
-    (x) => delayGain.gain.value = x / 100,
-    (x) => delay.delayTime.value = x / 100,
-    (x) => distortion.curve = makeDistortionCurve(x * 2),
-    (x) => hpf.frequency.value = x * 20,
-    (x) => noiseGain.gain.value = x / 500
-]
+ const convolver = actx.createConvolver();
+ convolver.buffer = convolverBuffer();
+ const convolverGain = actx.createGain();
+ convolverGain.gain.value = 0.1
 
-const container = document.getElementById('container')
-for (var i = 0; i < 16; i++) {
-    const knob = document.createElement('x-knobjs-knob')
-    knob.setAttribute('id', 'knob' + i)
-    knob.value = 20
-    const knobFn = knobFns[i]
-    knob.onchange = () => knobFn(knob.value)
-    container.appendChild(knob);
-}
+ osc2.connect(osc2gain)
+ osc2gain.connect(osc1.frequency)
+
+ osc1.connect(distortion)
+ distortion.connect(hpf)
+ hpf.connect(filter)
+ distortion.connect(filter)
+
+ lpfGain.connect(filter.frequency)
+
+ const out = actx.createGain()
+ out.gain.value = 0.5
+ out.connect(convolver)
+ out.connect(actx.destination)
+ convolver.connect(convolverGain)
+ convolverGain.connect(actx.destination)
+
+ filter.connect(delay)
+ filter.connect(out)
+ filter.connect(ringmod)
+
+ ringmodGain.connect(out)
+ delay.connect(out)
+
+ osc1down.connect(osc1downGain)
+ osc1downGain.connect(out)
+
+ osc1.start()
+ osc2.start()
+ osc1down.start()
+ ringmodFreq.start()
+
+ const knobFns = [
+     (x) => out.gain.value = x / 200,
+     (x) => { osc1.frequency.value = x * 5; osc1down.frequency.value = x * 2.5; },
+     (x) => osc2.frequency.value = x * 5,
+     (x) => osc2gain.gain.value = x * 2,
+     (x) => filter.frequency.value = x * 10,
+     (x) => delayGain.gain.value = x / 100,
+     (x) => delay.delayTime.value = x / 100,
+     (x) => distortion.curve = makeDistortionCurve(x * 2),
+     (x) => hpf.frequency.value = x * 20,
+     (x) => noiseGain.gain.value = x / 500,
+     (x) => ringmodFreq.frequency.value = x * 5,
+     (x) => ringmodGain.gain.value = x / 50,
+     (x) => lpfGain.gain.value = x * 20,
+     (x) => lpf.frequency.value = x * 5,
+     (x) => osc1downGain.gain.value = x / 100,
+     (x) => convolverGain.gain.value = x / 50,
+ ]
+
+ const container = document.getElementById('container')
+ for (var i = 0; i < 16; i++) {
+     const knob = document.createElement('x-knobjs-knob')
+     knob.setAttribute('id', 'knob' + i)
+     knob.value = 20
+     const knobFn = knobFns[i]
+     knob.onchange = () => knobFn(knob.value)
+     knob.value = 0
+     container.appendChild(knob);
+ }
 
 </script>
 
