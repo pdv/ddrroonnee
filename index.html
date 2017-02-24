@@ -2,6 +2,7 @@
 <title>drone</title>
 <link rel='stylesheet' href='http://www.russellmcc.com/knobjs/knobjs.css'>
 <script src="http://www.russellmcc.com/knobjs/knob.min.js"></script>
+<script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.6/socket.io.min.js"></script>
 
 <div id="container">
 </div>
@@ -28,11 +29,14 @@
  const osc2gain = actx.createGain()
  osc2gain.gain.value = 30
 
- const lpf = actx.createOscillator()
- lpf.frequency.value = 0
- const lpfGain = actx.createGain()
- lpfGain.gain.value = 50
- lpf.connect(lpfGain)
+    const osc3 = actx.createOscillator()
+    osc3.type = 'triangle'
+    const osc3gain = actx.createGain()
+    osc3.connect(osc3gain)
+
+ const lpf = actx.createBiquadFilter()
+ lpf.type = 'lowpass'
+ lpf.Q.value = 2
 
  const filter = actx.createBiquadFilter()
  filter.type = "peaking"
@@ -49,13 +53,9 @@
  filter.type = "highpass"
  filter.frequency.value = 200
 
- const ringmod = actx.createDelay(1)
- const ringmodFreq = actx.createOscillator()
- const ringmodGain = actx.createGain()
- ringmodFreq.frequency.value = 200
- ringmodGain.gain.value = 0.2
- ringmodFreq.connect(ringmod.delayTime)
- ringmod.connect(ringmodGain)
+ const lfo = actx.createOscillator()
+ const lfoGain = actx.createGain()
+ lfo.connect(lfoGain)
 
  // Distortion
 
@@ -118,63 +118,103 @@
  osc2gain.connect(osc1.frequency)
 
  osc1.connect(distortion)
- distortion.connect(hpf)
- hpf.connect(filter)
- distortion.connect(filter)
+ osc3gain.connect(distortion)
 
- lpfGain.connect(filter.frequency)
+ distortion.connect(hpf)
+ hpf.connect(lpf)
+ lpf.connect(filter)
 
  const out = actx.createGain()
  out.gain.value = 0.5
  out.connect(convolver)
  out.connect(actx.destination)
- convolver.connect(convolverGain)
- convolverGain.connect(actx.destination)
 
  filter.connect(delay)
  filter.connect(out)
- filter.connect(ringmod)
 
- ringmodGain.connect(out)
+ lfoGain.connect(lpf.frequency)
  delay.connect(out)
 
  osc1down.connect(osc1downGain)
- osc1downGain.connect(out)
+ osc1downGain.connect(distortion)
 
  osc1.start()
  osc2.start()
  osc1down.start()
- ringmodFreq.start()
+ osc3.start()
+ lfo.start()
 
  const knobFns = [
      (x) => out.gain.value = x / 200,
-     (x) => { osc1.frequency.value = x * 5; osc1down.frequency.value = x * 2.5; },
+     (x) => {
+         osc1.frequency.value = x * 5;
+         osc1down.frequency.value = x * 2.5;
+         osc3.frequency.value = x * 15;
+     },
      (x) => osc2.frequency.value = x * 5,
      (x) => osc2gain.gain.value = x * 2,
      (x) => filter.frequency.value = x * 10,
      (x) => delayGain.gain.value = x / 100,
      (x) => delay.delayTime.value = x / 100,
      (x) => distortion.curve = makeDistortionCurve(x * 2),
-     (x) => hpf.frequency.value = x * 20,
+     (x) => hpf.frequency.value = 10000. / (x+1),
      (x) => noiseGain.gain.value = x / 500,
-     (x) => ringmodFreq.frequency.value = x * 5,
-     (x) => ringmodGain.gain.value = x / 50,
-     (x) => lpfGain.gain.value = x * 20,
+     (x) => lfo.frequency.value = x / 50.,
+     (x) => lfoGain.gain.value = x * 5,
+     (x) => lpf.Q.value = x / 10,
      (x) => lpf.frequency.value = x * 5,
      (x) => osc1downGain.gain.value = x / 100,
-     (x) => convolverGain.gain.value = x / 50,
+     (x) => osc3gain.gain.value = x / 100,
  ]
 
+ var knobs = []
+
+ function makeid() {
+     var text = "";
+     var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+     for(var i = 0; i < 16; i++) {
+         text += possible.charAt(Math.floor(Math.random() * possible.length));
+     }
+     return text;
+ }
+ const userId = makeid()
+
+ var socket = io.connect('http://127.0.0.1:5000/');
  const container = document.getElementById('container')
+
  for (var i = 0; i < 16; i++) {
      const knob = document.createElement('x-knobjs-knob')
-     knob.setAttribute('id', 'knob' + i)
+     knob.setAttribute('id', i)
      knob.value = 20
      const knobFn = knobFns[i]
-     knob.onchange = () => knobFn(knob.value)
-     knob.value = 0
+     const data = { knob: i, user: userId}
+     knob.onchange = () => {
+         knobFn(knob.value)
+         data.value = knob.value
+         if (knobs[knob.id].enabled) {
+             socket.emit('knob_turn', data)
+         }
+     }
      container.appendChild(knob);
+     knobs.push({
+         knob: knob,
+         enabled: true
+     })
+     knob.value = 0
  }
+
+ socket.on('connect', function() {
+     console.log('connected')
+ });
+ socket.on('knob_turn', function(msg) {
+     console.log(msg)
+     if (msg.user != userId) {
+         const knobj = knobs[msg.knob]
+         knobj.enabled = false
+         knobj.knob.value = msg.value
+         knobj.enabled = true
+     }
+ });
 
 </script>
 
