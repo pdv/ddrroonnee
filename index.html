@@ -185,7 +185,6 @@
  for (var i = 0; i < 16; i++) {
      const knob = document.createElement('x-knobjs-knob')
      knob.setAttribute('id', i)
-     knob.value = 20
      const knobFn = knobFns[i]
      const data = { knob: i, user: userId}
      knob.onchange = () => {
@@ -200,7 +199,13 @@
          knob: knob,
          enabled: true
      })
-     knob.value = 0
+     if (i == 0) {
+         knob.value = 10
+     } else if (i == 9) {
+         knob.value = 0
+     } else {
+         knob.value = 50
+     }
  }
 
  socket.on('connect', function() {
